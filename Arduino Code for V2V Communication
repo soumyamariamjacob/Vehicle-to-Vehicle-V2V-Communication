@@ -1,0 +1,72 @@
+#include <Wire.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+#include <XBee.h>
+
+#define BUZZER_PIN D6
+#define LED_WARNING_PIN D7
+#define LED_INFO_PIN D8
+
+SoftwareSerial gpsSerial(D4, D5);  // RX, TX for GPS
+TinyGPSPlus gps;
+XBee xbee = XBee();
+
+XBeeAddress64 addr64 = XBeeAddress64(0x0013A200, 0x40B9FBF0);  // Example address
+uint8_t payload[50];
+ZBTxRequest zbTx = ZBTxRequest(addr64, payload, sizeof(payload));
+ZBRxResponse zbRx = ZBRxResponse();
+
+void setup() {
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
+  xbee.begin(Serial);
+  
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_WARNING_PIN, OUTPUT);
+  pinMode(LED_INFO_PIN, OUTPUT);
+}
+
+void loop() {
+  // Collect GPS data
+  while (gpsSerial.available()) {
+    gps.encode(gpsSerial.read());
+  }
+
+  if (gps.location.isValid()) {
+    // Prepare data packet
+    String data = "ID:1234,Speed:60,Lat:" + String(gps.location.lat(), 6) + ",Lng:" + String(gps.location.lng(), 6);
+    data.toCharArray((char *)payload, sizeof(payload));
+    
+    // Send data packet
+    xbee.send(zbTx);
+  }
+  
+  // Check for incoming data
+  if (xbee.readPacket(500)) {
+    if (xbee.getResponse().isAvailable()) {
+      if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
+        xbee.getResponse().getZBRxResponse(zbRx);
+        String receivedData = String((char *)zbRx.getData());
+
+        // Process received data
+        if (receivedData.indexOf("Warning") != -1) {
+          triggerAlert();
+        } else {
+          digitalWrite(LED_INFO_PIN, HIGH);  // Show information LED
+          delay(500);
+          digitalWrite(LED_INFO_PIN, LOW);
+        }
+      }
+    }
+  }
+
+  delay(1000);
+}
+
+void triggerAlert() {
+  digitalWrite(BUZZER_PIN, HIGH);
+  digitalWrite(LED_WARNING_PIN, HIGH);
+  delay(1000);
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(LED_WARNING_PIN, LOW);
+}
